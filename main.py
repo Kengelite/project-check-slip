@@ -8,7 +8,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from torchvision import transforms
 from pyzbar.pyzbar import decode
-from inference import get_model  # โหลดโมเดล Roboflow มาไว้ในเครื่อง (Local)
+from inference import get_model
 from starlette.concurrency import run_in_threadpool
 import logging
 
@@ -47,6 +47,20 @@ except Exception as e:
     raise e
 
 app = FastAPI(title="Superfast Slip API", version="1.0")
+
+# --- 🚀 ใหม่: ฟังก์ชัน Resize เพื่อความเร็ว (คุมไม่ให้เกิน 1024px) ---
+def resize_image(img, max_dim=1024):
+    h, w = img.shape[:2]
+    if max(h, w) <= max_dim:
+        return img
+    
+    if h > w:
+        new_h, new_w = max_dim, int(w * (max_dim / h))
+    else:
+        new_h, new_w = int(h * (max_dim / w)), max_dim
+        
+    # ใช้ INTER_AREA เพราะคุณภาพดีที่สุดสำหรับการลดขนาดภาพ
+    return cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
 # --- ฟังก์ชันแต่งภาพ 4 สูตร ---
 def get_enhanced_qrs(cropped_qr):
@@ -112,7 +126,6 @@ def process_slip_logic(img_cv2: np.ndarray) -> dict:
         if not predictions:
             return {"status": "failed", "reason": "QR code not found"}
             
-        detector = cv2.QRCodeDetector()
         for pred in predictions:
             x_min = max(0, int(pred['x'] - (pred['width'] / 2)))
             y_min = max(0, int(pred['y'] - (pred['height'] / 2)))
@@ -128,11 +141,6 @@ def process_slip_logic(img_cv2: np.ndarray) -> dict:
                     for obj in decoded_enhanced:
                         qr_data_list.append(obj.data.decode("utf-8"))
                     return {"status": "success", "method": f"filter_{filter_name}", "payload": qr_data_list}
-                
-                data, _, _ = detector.detectAndDecode(enhanced_img)
-                if data:
-                    qr_data_list.append(data)
-                    return {"status": "success", "method": f"opencv_{filter_name}", "payload": qr_data_list}
         return {"status": "failed", "reason": "Unreadable QR"}
     except Exception as e:
         return {"status": "error", "reason": str(e)}
@@ -140,13 +148,18 @@ def process_slip_logic(img_cv2: np.ndarray) -> dict:
 # --- API Endpoint ---
 @app.post("/scan-slip/")
 async def scan_slip(file: UploadFile = File(...)):
-    if not file.content_type.startswith("image/"):
+    if file.content_type and not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Invalid file type.")
+    
     contents = await file.read()
     nparr = np.frombuffer(contents, np.uint8)
     img_cv2 = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
     if img_cv2 is None:
         raise HTTPException(status_code=400, detail="Could not decode image.")
+    
+    # ⚡ ทำการ Resize ก่อนส่งเข้า Pipeline เพื่อความแรง
+    img_cv2 = resize_image(img_cv2, max_dim=1024)
         
     result = await run_in_threadpool(process_slip_logic, img_cv2)
     return JSONResponse(content=result, status_code=200 if result["status"] == "success" else 400)
