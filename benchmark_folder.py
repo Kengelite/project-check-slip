@@ -4,44 +4,50 @@ import concurrent.futures
 import statistics
 import os
 import glob
+import random
 
-# ==========================================
-# ⚙️ ตั้งค่าการทดสอบ
-# ==========================================
-API_URL = "http://127.0.0.1:8000/scan-slip/" 
-FOLDER_PATH = "./test"  # 👈 ชื่อโฟลเดอร์ที่เก็บรูปทดสอบของคุณ
-CONCURRENT_USERS = 10          # ยิงพร้อมกันกี่คน
-
-# กวาดหารูปภาพทั้งหมดในโฟลเดอร์
+API_URL = "http://127.0.0.1:8000/api/scan-slip/" 
+# API_URL = "http://159.65.8.69/scan-slip/"
+FOLDER_PATH = "./test-2" 
+CONCURRENT_USERS = 10  
+api_key = "sk_JTXILkSI65A0aXJB6BPARM8YugPmshzwPRjOx8w2vV8"
+# กวาดหารูปภาพ
 image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG']
 image_files = []
 for ext in image_extensions:
     image_files.extend(glob.glob(os.path.join(FOLDER_PATH, ext)))
 
-TOTAL_IMAGES = len(image_files)
 
-if TOTAL_IMAGES == 0:
-    print(f"❌ ไม่เจอรูปภาพในโฟลเดอร์ '{FOLDER_PATH}' เลยครับ!")
-    exit()
+test_queue = image_files * 1 
 
-# แก้ใน benchmark.py หรือ benchmark_folder.py
 def send_request(img_path):
+    """ฟังก์ชันจำลองพฤติกรรม 1 User"""
+    
+    headers = {
+        "X-API-Key": api_key
+    }
+ 
     with open(img_path, "rb") as f:
-        # ระบุ Content-Type เข้าไปด้วย (image/jpeg)
-        files = {"file": (os.path.basename(img_path), f, "image/jpeg")} 
+        files = {"file": (os.path.basename(img_path), f, "image/jpeg")}
         start_time = time.time()
         try:
-            response = requests.post(API_URL, files=files)
-            return time.time() - start_time, response.status_code, os.path.basename(img_path)
+            response = requests.post(API_URL, files=files, headers=headers, timeout=30)
+            latency = time.time() - start_time
+            
+            # ดึง JSON ออกมาถ้ารันสำเร็จ (เพื่อเตรียมส่งกลับ)
+            res_json = response.json() if response.status_code == 200 else {}
+            
+            #  ต้อง return 4 ตัวให้ตรงกับที่รอรับ
+            return latency, response.status_code, os.path.basename(img_path), res_json
+            
         except Exception as e:
-            return 0, str(e), os.path.basename(img_path)
-        
+            #  ตรง except ก็ต้อง return 4 ตัวด้วย (ใส่ {} เปล่าๆ ปิดท้าย)
+            return 0, str(e), os.path.basename(img_path), {}
+
 
 print("="*50)
-print(f"🚀 เริ่มต้น Benchmark ด้วยรูปภาพในโฟลเดอร์")
-print(f"📂 Folder: {FOLDER_PATH}")
-print(f"📦 จำนวนรูปภาพทั้งหมด: {TOTAL_IMAGES} รูป")
-print(f"🚦 Concurrent Workers: {CONCURRENT_USERS}")
+print(f"🔥 สั่งกองทัพ {CONCURRENT_USERS} Users บุกยิง!")
+print(f"📦 จำนวนรวมทั้งหมด: {len(test_queue)} Requests")
 print("="*50)
 
 start_test = time.time()
@@ -49,19 +55,40 @@ success_count = 0
 fail_count = 0
 latencies = []
 
-# ใช้ ThreadPool เพื่อรันงานขนานกัน
-with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_USERS) as executor:
-    # ส่ง list ของไฟล์ภาพเข้าไปทำงาน
-    results = list(executor.map(send_request, image_files))
 
-for latency, status, file_name in results:
-    if status == 200:
-        success_count += 1
-        latencies.append(latency)
-        print(f"✅ {file_name}: OK ({latency:.3f}s)")
-    else:
-        fail_count += 1
-        print(f"❌ {file_name}: Failed/Rejected (Status: {status})")
+# --- เริ่มต้นการยิงแบบไม่รอใคร ---
+with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_USERS) as executor:
+    # 1. ส่งงานทั้งหมดเข้าคิว (ไม่รอผล)
+    future_to_img = {executor.submit(send_request, img): img for img in test_queue}
+    
+    # 2. ใครทำเสร็จก่อน ให้แสดงผลทันที (as_completed)
+    for i, future in enumerate(concurrent.futures.as_completed(future_to_img)):
+        #  รับค่า res_json ที่ส่งมาจาก send_request เพิ่มเข้ามา
+        latency, status_code, file_name, res_json = future.result()
+        
+        if status_code == 200:
+            success_count += 1
+            latencies.append(latency)
+            
+            #  ดึงข้อมูลจาก JSON
+            ai_status = res_json.get("status", "N/A")
+            confidence = res_json.get("confidence", 0.0)
+            
+            #  จัด Tag ให้สวยงามตามสถานะที่ API ตอบกลับมา
+            if ai_status == "ผ่าน":
+                tag = f"✅ {ai_status} ({confidence}%)"
+            elif ai_status == "ไม่ผ่าน":
+                tag = f"❌ {ai_status} ({confidence}%)"
+            else:
+                tag = f"⚠️ {ai_status} ({confidence}%)"
+                
+        else:
+            fail_count += 1
+            tag = f"💥 FAIL (HTTP {status_code})"
+        
+        # แสดงผล Real-time (ใช้ <16 เพื่อจัดช่องไฟให้ตรงกัน)
+        current_rps = (i + 1) / (time.time() - start_test)
+        print(f"[{i+1}/{len(test_queue)}] {tag:<16} | {file_name:<15} | {latency:.3f}s | Current RPS: {current_rps:.2f}")
 
 total_time = time.time() - start_test
 
@@ -69,16 +96,13 @@ total_time = time.time() - start_test
 # 📊 สรุปผล Report
 # ==========================================
 print("\n" + "="*50)
-print("📊 สรุปผลการทดสอบรายโฟลเดอร์:")
+print("📊 สรุปพลังทำลายล้าง:")
 print("="*50)
 print(f"⏱️ เวลาที่ใช้รวม:   {total_time:.2f} วินาที")
-print(f"✅ สำเร็จ (200):   {success_count} รูป")
-print(f"❌ ไม่ผ่าน (Error): {fail_count} รูป")
+print(f"✅ สำเร็จ: {success_count} | ❌ ล้มเหลว: {fail_count}")
 
 if latencies:
-    avg_latency = statistics.mean(latencies)
-    rps = TOTAL_IMAGES / total_time
     print("-" * 50)
-    print(f"🚀 เฉลี่ยความเร็วระบบ (RPS): {rps:.2f} รูป/วินาที")
-    print(f"⚡ Latency เฉลี่ยต่อรูป:      {avg_latency:.3f} วินาที")
+    print(f"🚀 FINAL RPS: {len(test_queue) / total_time:.2f} รูป/วินาที")
+    print(f"⚡ Latency เฉลี่ย: {statistics.mean(latencies):.3f} วินาที")
 print("="*50)

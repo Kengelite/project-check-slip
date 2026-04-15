@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบหลังบ้าน - จัดการ Key (API Tokens)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap');
+
+        body { font-family: 'Kanit', sans-serif; }
+        [x-cloak] { display: none !important; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+    <script>
+        const token = localStorage.getItem('token');
+        const role = localStorage.getItem('role');
+
+        // 1. ถ้าไม่มี Token (ยังไม่ล็อกอิน) ให้เตะไปหน้า Login
+        if (!token) {
+            window.location.replace('/login');
+        }
+        // 2. ถ้าล็อกอินแล้ว แต่ "ไม่ใช่ Super Admin" ให้เตะกลับไปหน้า Dashboard
+        else if (role !== 'Super Admin') {
+            window.location.replace('/dashboard'); // หรือแจ้งเตือนก่อนค่อยเตะก็ได้ครับ
+        }
+    </script>
+</head>
+
+<body class="bg-gray-100 text-gray-800" x-data="keyManager()">
+
+    <div x-show="showToast" x-transition.opacity
+         class="fixed top-5 right-5 z-[60] bg-gray-800 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-3" x-cloak>
+        <i class="fa-solid fa-circle-check text-green-400"></i>
+        <span x-text="toastMessage"></span>
+    </div>
+
+    <div x-show="isCreateModalOpen"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" x-transition.opacity
+        x-cloak>
+        <div @click.away="!isSaving && (isCreateModalOpen = false)"
+            class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 class="text-lg font-bold text-gray-800"><i class="fa-solid fa-key text-blue-500 mr-2"></i>สร้าง API Key ใหม่</h3>
+                <button @click="isCreateModalOpen = false" :disabled="isSaving" class="text-gray-400 hover:text-gray-600 disabled:opacity-50"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            
+            <div class="p-6 space-y-4">
+                <template x-if="newlyCreatedToken">
+                    <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg">
+                        <p class="text-sm text-blue-800 font-semibold mb-2"><i class="fa-solid fa-triangle-exclamation text-orange-500 mr-1"></i> โปรดคัดลอก Token นี้ไว้ ระบบจะแสดงเพียงครั้งเดียว!</p>
+                        <div class="flex items-center gap-2">
+                            <input type="text" readonly x-model="newlyCreatedToken" class="w-full bg-white border border-blue-200 rounded px-3 py-2 text-sm font-mono text-gray-700">
+                            <button @click="copyToClipboard(newlyCreatedToken)" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-sm transition-colors"><i class="fa-regular fa-copy"></i></button>
+                        </div>
+                    </div>
+                </template>
+
+                <template x-if="!newlyCreatedToken">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">อายุการใช้งาน (วัน)</label>
+                        <input type="number" x-model.number="createForm.expires_in_days" min="1"
+                            class="w-full border border-gray-300 rounded-lg px-4 py-2 outline-none focus:border-blue-500">
+                        <p class="text-xs text-gray-400 mt-1">ค่าเริ่มต้นคือ 365 วัน (1 ปี)</p>
+                    </div>
+                </template>
+            </div>
+
+            <div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50">
+                <template x-if="!newlyCreatedToken">
+                    <button @click="isCreateModalOpen = false" :disabled="isSaving" class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg font-medium disabled:opacity-50">ยกเลิก</button>
+                </template>
+                <template x-if="!newlyCreatedToken">
+                    <button @click="createKey()" :disabled="isSaving" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium flex items-center disabled:opacity-50">
+                        <span x-show="!isSaving">สร้าง Key</span>
+                        <i x-show="isSaving" class="fa-solid fa-spinner animate-spin"></i>
+                    </button>
+                </template>
+                <template x-if="newlyCreatedToken">
+                    <button @click="closeCreateModal()" class="px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded-lg font-medium">ปิดหน้าต่าง</button>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="isEditModalOpen"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" x-transition.opacity
+        x-cloak>
+        <div @click.away="!isSaving && (isEditModalOpen = false)"
+            class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 class="text-lg font-bold text-gray-800"><i class="fa-solid fa-key text-blue-500 mr-2"></i>จัดการสถานะ Key</h3>
+                <button @click="isEditModalOpen = false" :disabled="isSaving" class="text-gray-400 hover:text-gray-600 disabled:opacity-50"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div class="p-6 space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">API Token</label>
+                    <input type="text" x-model="editForm.token" readonly
+                        class="w-full bg-gray-100 border border-gray-300 rounded-lg px-4 py-2 outline-none text-gray-500 font-mono text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">สถานะการใช้งาน</label>
+                    <select x-model="editForm.is_active"
+                        class="w-full border border-gray-300 rounded-lg px-4 py-2 outline-none focus:border-blue-500">
+                        <option value="true">ใช้งานปกติ (Active)</option>
+                        <option value="false">ระงับการใช้งาน (Revoked)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50">
+                <button @click="isEditModalOpen = false" :disabled="isSaving" class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg font-medium disabled:opacity-50">ยกเลิก</button>
+                <button @click="saveEdit()" :disabled="isSaving" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium flex items-center disabled:opacity-50">
+                    <span x-show="!isSaving">บันทึก</span>
+                    <i x-show="isSaving" class="fa-solid fa-spinner animate-spin"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="isDeleteModalOpen"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" x-transition.opacity
+        x-cloak>
+        <div @click.away="!isDeleting && (isDeleteModalOpen = false)"
+            class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6 text-center">
+            <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fa-solid fa-trash-can text-3xl text-red-500"></i>
+            </div>
+            <h3 class="text-xl font-bold text-gray-800 mb-2">ยืนยันการลบ Key?</h3>
+            <p class="text-gray-500 mb-6 text-sm">การกระทำนี้ไม่สามารถย้อนกลับได้ ระบบที่ใช้ Key นี้อยู่จะไม่สามารถเข้าถึง API ได้อีก</p>
+            <div class="flex gap-3">
+                <button @click="isDeleteModalOpen = false" :disabled="isDeleting" class="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium disabled:opacity-50">ยกเลิก</button>
+                <button @click="confirmDelete()" :disabled="isDeleting" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium flex justify-center items-center disabled:opacity-50">
+                    <span x-show="!isDeleting">ยืนยันลบ</span>
+                    <i x-show="isDeleting" class="fa-solid fa-spinner animate-spin"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="min-h-screen flex w-full relative overflow-hidden">
+
+        <div x-show="sidebarOpen" @click="sidebarOpen = false" x-transition.opacity
+            class="fixed inset-0 bg-black/50 z-20 md:hidden" x-cloak></div>
+
+        {% include 'nav.html' %}
+
+        <main class="flex-1 flex flex-col h-screen min-w-0 overflow-hidden">
+            <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 md:px-8 shadow-sm">
+                <div class="flex items-center gap-3">
+                    <button @click="sidebarOpen = true" class="md:hidden text-gray-600 hover:text-gray-900 focus:outline-none">
+                        <i class="fa-solid fa-bars text-xl"></i>
+                    </button>
+                    <h1 class="text-lg md:text-xl font-semibold text-gray-800 truncate">จัดการ Key (API Tokens)</h1>
+                </div>
+                {% include 'profile.html' %}
+            </header>
+
+            <div class="flex-1 overflow-y-auto p-4 md:p-8 bg-gray-50 no-scrollbar">
+
+                <div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
+                    <h2 class="text-lg font-semibold text-gray-700 w-full sm:w-auto">รายการ API Key ในระบบ</h2>
+                    
+                    <div class="flex w-full sm:w-auto gap-3">
+                        <div class="relative group flex-1 sm:w-64">
+                            <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors"></i>
+                            <input type="text" placeholder="ค้นหา Key หรือ ผู้สร้าง..." x-model.debounce.500ms="filterSearch"
+                                class="w-full pl-11 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all">
+                        </div>
+
+                        <button @click="openCreate()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl shadow-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap">
+                            <i class="fa-solid fa-plus"></i> <span class="hidden sm:inline">เพิ่ม Key ใหม่</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    
+                    <template x-if="isLoading">
+                        <div class="p-12 text-center text-gray-400">
+                            <i class="fa-solid fa-spinner animate-spin text-2xl mb-2 text-blue-500"></i>
+                            <p>กำลังโหลดข้อมูล...</p>
+                        </div>
+                    </template>
+
+                    <div class="w-full overflow-x-auto" x-show="!isLoading">
+                        <table class="w-full text-left border-collapse min-w-[600px]">
+                            <thead>
+                                <tr class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
+                                    <th class="p-4 font-medium whitespace-nowrap text-center w-16">#</th>
+                                    <th class="p-4 font-medium whitespace-nowrap">Token</th>
+                                    <th class="p-4 font-medium whitespace-nowrap">ผู้สร้าง (User)</th>
+                                    <th class="p-4 font-medium whitespace-nowrap">สถานะ</th>
+                                    <th class="p-4 font-medium whitespace-nowrap">วันหมดอายุ</th>
+                                    <th class="p-4 font-medium whitespace-nowrap text-center">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-sm divide-y divide-gray-100">
+                                <template x-if="keys.length === 0">
+                                    <tr>
+                                        <td colspan="6" class="p-8 text-center text-gray-400">ไม่พบข้อมูล Key</td>
+                                    </tr>
+                                </template>
+                                <template x-for="(keyObj, index) in keys" :key="keyObj.id">
+                                    <tr class="hover:bg-gray-50 transition-colors">
+                                        <td class="p-4 text-center font-medium text-gray-400" x-text="(currentPage - 1) * itemsPerPage + (index + 1)"></td>
+                                        
+                                        <td class="p-4 font-mono text-gray-600 text-xs">
+                                            <div class="flex items-center gap-2">
+                                                <span x-text="keyObj.token.substring(0, 15) + '...'"></span>
+                                                <button @click="copyToClipboard(keyObj.token)" class="text-gray-400 hover:text-blue-500" title="คัดลอก"><i class="fa-regular fa-copy"></i></button>
+                                            </div>
+                                        </td>
+                                        
+                                        <td class="p-4 text-gray-800 font-medium" x-text="keyObj.user_name"></td>
+                                        <td class="p-4">
+                                            <span :class="keyObj.is_active === 'true' || keyObj.is_active === true ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+                                                class="px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap"
+                                                x-text="keyObj.is_active === 'true' || keyObj.is_active === true ? 'ใช้งาน' : 'ระงับ'"></span>
+                                        </td>
+                                        <td class="p-4 text-gray-500" x-text="keyObj.expires_at"></td>
+                                        <td class="p-4 whitespace-nowrap text-center">
+                                            <button @click="openEdit(keyObj)" title="แก้ไขสถานะ"
+                                                class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 w-9 h-9 rounded-xl transition-colors mr-1">
+                                                <i class="fa-solid fa-pen text-xs"></i>
+                                            </button>
+                                            <button @click="openDelete(keyObj.id)" title="ลบ Key"
+                                                class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 w-9 h-9 rounded-xl transition-colors">
+                                                <i class="fa-solid fa-trash text-xs"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="p-4 flex flex-col lg:flex-row justify-between items-center gap-4 border-t border-gray-100" x-show="!isLoading && totalItems > 0" x-cloak>
+                        <div class="flex flex-col sm:flex-row items-center gap-3 sm:gap-6 text-sm text-gray-500 w-full lg:w-auto text-center sm:text-left">
+                            <div>
+                                แสดง <span class="font-bold text-gray-800" x-text="(currentPage - 1) * itemsPerPage + 1"></span>
+                                ถึง <span class="font-bold text-gray-800" x-text="Math.min(currentPage * itemsPerPage, totalItems)"></span>
+                                จาก <span class="font-bold text-gray-800" x-text="totalItems"></span> รายการ
+                            </div>
+                            <div class="flex items-center gap-2 sm:border-l sm:border-gray-300 sm:pl-6">
+                                <span>แสดงหน้าละ:</span>
+                                <select x-model.number="itemsPerPage" @change="currentPage = 1; fetchKeys()" class="border border-gray-300 rounded-lg px-2 py-1.5 outline-none focus:border-blue-500 bg-white cursor-pointer font-medium text-gray-700">
+                                    <option value="10">10</option>
+                                    <option value="20">20</option>
+                                    <option value="50">50</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-2 w-full lg:w-auto justify-center">
+                            <button @click="prevPage()" :disabled="currentPage === 1" class="px-3 py-1.5 sm:px-4 sm:py-2 text-sm font-medium border border-gray-300 rounded-lg bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center">
+                                <i class="fa-solid fa-chevron-left mr-1"></i> ก่อนหน้า
+                            </button>
+                            <div class="flex items-center px-4 py-2 text-sm font-bold bg-blue-50 text-blue-600 rounded-lg border border-blue-100 whitespace-nowrap">
+                                หน้า <span x-text="currentPage" class="mx-1"></span> จาก <span x-text="totalPages" class="ml-1"></span>
+                            </div>
+                            <button @click="nextPage()" :disabled="currentPage >= totalPages" class="px-3 py-1.5 sm:px-4 sm:py-2 text-sm font-medium border border-gray-300 rounded-lg bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center">
+                                ถัดไป <i class="fa-solid fa-chevron-right ml-1"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function keyManager() {
+            return {
+                sidebarOpen: false,
+                keys: [], 
+                isLoading: false,
+                isSaving: false,
+                isDeleting: false,
+                filterSearch: '',
+                
+                currentPage: 1,
+                itemsPerPage: 10,
+                totalItems: 0,
+                totalPages: 1,
+
+                // Modal States
+                isCreateModalOpen: false,
+                isEditModalOpen: false,
+                isDeleteModalOpen: false,
+                
+                // Form Data
+                createForm: { expires_in_days: 365 },
+                newlyCreatedToken: null,
+                editForm: { id: null, token: '', is_active: 'true' },
+                deleteTargetId: null,
+
+                // Toast
+                showToast: false,
+                toastMessage: '',
+
+                async init() {
+                    if (!localStorage.getItem('token')) {
+                        window.location.href = '/login';
+                        return;
+                    }
+
+                    this.$watch('filterSearch', () => { 
+                        this.currentPage = 1; 
+                        this.fetchKeys(); 
+                    });
+
+                    await this.fetchKeys();
+                },
+
+                // =====================================
+                // 🌐 API: อ่านข้อมูล
+                // =====================================
+                async fetchKeys() {
+                    this.isLoading = true;
+                    try {
+                        const params = new URLSearchParams({
+                            search: this.filterSearch,
+                            page: this.currentPage,
+                            limit: this.itemsPerPage
+                        });
+
+                        const response = await fetch(`/api/keys?${params.toString()}`, {
+                            method: 'GET',
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                                'Content-Type': 'application/json'
+                            }
+                        });
+
+                        if (response.status === 401) {
+                            alert('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
+                            this.logout();
+                            return;
+                        }
+
+                        if (!response.ok) throw new Error('Fetch failed');
+
+                        const json = await response.json();
+                        
+                        this.totalItems = json.pagination.total_items;
+                        this.totalPages = json.pagination.total_pages;
+
+                        this.keys = json.data.map(item => ({
+                            id: item.id,
+                            token: item.token,
+                            user_name: item.user_name,
+                            is_active: item.is_active,
+                            expires_at: new Date(item.expires_at).toLocaleString('th-TH', {
+                                day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                            })
+                        }));
+
+                    } catch (error) {
+                        console.error('Error fetching keys:', error);
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                // =====================================
+                // 🔑 API: สร้าง Key ใหม่
+                // =====================================
+                openCreate() {
+                    this.createForm = { expires_in_days: 365 };
+                    this.newlyCreatedToken = null;
+                    this.isCreateModalOpen = true;
+                },
+
+                async createKey() {
+                    if (!this.createForm.expires_in_days || this.createForm.expires_in_days < 1) {
+                        alert("กรุณาระบุอายุการใช้งานให้ถูกต้อง");
+                        return;
+                    }
+
+                    this.isSaving = true;
+                    try {
+                        const response = await fetch('/api/keys', {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                expires_in_days: parseInt(this.createForm.expires_in_days)
+                            })
+                        });
+
+                        if (response.status === 401) {
+                            this.logout();
+                            return;
+                        }
+
+                        if (!response.ok) throw new Error('สร้าง Key ไม่สำเร็จ');
+
+                        const result = await response.json();
+                        
+                        // แสดง Token ที่เพิ่งสร้างให้ผู้ใช้คัดลอก
+                        this.newlyCreatedToken = result.data.token;
+                        
+                        // โหลดตารางใหม่
+                        this.currentPage = 1;
+                        await this.fetchKeys();
+
+                    } catch (error) {
+                        alert(error.message);
+                    } finally {
+                        this.isSaving = false;
+                    }
+                },
+
+                closeCreateModal() {
+                    this.isCreateModalOpen = false;
+                    this.newlyCreatedToken = null;
+                },
+
+                // =====================================
+                // ✏️ API: แก้ไขสถานะ
+                // =====================================
+                openEdit(keyObj) {
+                    this.editForm = { ...keyObj, is_active: keyObj.is_active.toString() };
+                    this.isEditModalOpen = true;
+                },
+                
+                async saveEdit() {
+                    this.isSaving = true;
+                    try {
+                        const response = await fetch(`/api/keys/${this.editForm.id}`, {
+                            method: 'PUT',
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                is_active: this.editForm.is_active === 'true'
+                            })
+                        });
+
+                        if (response.status === 401) {
+                            this.logout();
+                            return;
+                        }
+
+                        if (!response.ok) throw new Error('เกิดข้อผิดพลาดในการอัปเดต');
+
+                        this.isEditModalOpen = false;
+                        await this.fetchKeys(); // โหลดใหม่เพื่อให้ข้อมูลตรงกับ Backend
+
+                    } catch (error) {
+                        alert(error.message);
+                    } finally {
+                        this.isSaving = false;
+                    }
+                },
+
+                // =====================================
+                // 🗑️ API: ลบถาวร
+                // =====================================
+                openDelete(id) {
+                    this.deleteTargetId = id;
+                    this.isDeleteModalOpen = true;
+                },
+                
+                async confirmDelete() {
+                    if (!this.deleteTargetId) return;
+                    
+                    this.isDeleting = true;
+                    try {
+                        const response = await fetch(`/api/keys/${this.deleteTargetId}`, {
+                            method: 'DELETE',
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                                'Content-Type': 'application/json'
+                            }
+                        });
+
+                        if (response.status === 401) {
+                            this.logout();
+                            return;
+                        }
+
+                        if (!response.ok) throw new Error('เกิดข้อผิดพลาดในการลบ Key');
+
+                        this.isDeleteModalOpen = false;
+                        this.deleteTargetId = null;
+
+                        if (this.keys.length === 1 && this.currentPage > 1) {
+                            this.currentPage--;
+                        }
+                        
+                        await this.fetchKeys();
+
+                    } catch (error) {
+                        alert(error.message);
+                    } finally {
+                        this.isDeleting = false;
+                    }
+                },
+
+                // =====================================
+                // 📋 Utility: คัดลอก Token
+                // =====================================
+                async copyToClipboard(text) {
+                    try {
+                        await navigator.clipboard.writeText(text);
+                        this.toastMessage = 'คัดลอก Token สำเร็จแล้ว!';
+                        this.showToast = true;
+                        setTimeout(() => this.showToast = false, 3000);
+                    } catch (err) {
+                        console.error('Failed to copy text: ', err);
+                        alert('ไม่สามารถคัดลอกได้อัตโนมัติ กรุณาคลุมดำและคัดลอกด้วยตนเอง');
+                    }
+                },
+
+                // =====================================
+                // Pagination & Auth
+                // =====================================
+                nextPage() {
+                    if (this.currentPage < this.totalPages) {
+                        this.currentPage++;
+                        this.fetchKeys();
+                    }
+                },
+                prevPage() {
+                    if (this.currentPage > 1) {
+                        this.currentPage--;
+                        this.fetchKeys();
+                    }
+                },
+
+                logout() {
+                    localStorage.removeItem('token');
+                    window.location.href = '/login';
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>

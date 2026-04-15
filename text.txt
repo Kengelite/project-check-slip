@@ -1,0 +1,8 @@
+docker run -d --name postgres_db -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=supersecretpassword -e POSTGRES_DB=slip_db -p 5432:5432 postgres:15-alpine
+docker run -d --name db_adminer -p 8082:8080 adminer
+uvicorn main:app --reload
+
+python3 -m pip install greenlet
+
+
+python3 -m pip install

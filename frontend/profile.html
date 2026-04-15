@@ -1,0 +1,51 @@
+<div x-data="userProfile()" x-init="fetchUserProfile()">
+
+    <div class="flex items-center gap-2 md:gap-3">
+        <div class="text-right hidden sm:block">
+            <div class="text-sm font-semibold text-gray-800" x-text="userName">กำลังโหลด...</div>
+            
+            <div class="text-xs text-blue-600 font-medium" x-text="userRole"></div>
+        </div>
+        
+        <img :src="`https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=2563EB&color=fff`" 
+             class="w-8 h-8 md:w-10 md:h-10 rounded-full border-2 border-gray-200 shadow-sm transition-transform hover:scale-105">
+    </div>
+
+</div>
+
+<script>
+    function userProfile() {
+        return {
+            userName: 'ผู้ใช้งาน',
+            userRole: localStorage.getItem('role') || 'Staff', // ดึง Role มาโชว์ด้วยเลย
+
+            async fetchUserProfile() {
+                const token = localStorage.getItem('token');
+                if (!token) return;
+
+                try {
+                    // ยิง API ไปขอข้อมูลตัวเอง (คุณมี Endpoint นี้อยู่แล้วใน auth.py)
+                    const response = await fetch('/api/me', {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        // นำ full_name หรือ email มาแสดง
+                        this.userName = data.full_name || data.email || 'ผู้ดูแลระบบ';
+                    } else {
+                        // ถ้า Token หมดอายุ หรือมีปัญหา ให้เตะออก
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('role');
+                        window.location.href = '/login';
+                    }
+                } catch (error) {
+                    console.error('Error fetching user profile:', error);
+                }
+            }
+        }
+    }
+</script>

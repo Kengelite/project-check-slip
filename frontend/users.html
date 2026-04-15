@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบหลังบ้าน - จัดการผู้ใช้งาน</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap');
+
+        body { font-family: 'Kanit', sans-serif; }
+        [x-cloak] { display: none !important; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+    <script>
+        const token = localStorage.getItem('token');
+        const role = localStorage.getItem('role');
+
+        // 1. ถ้าไม่มี Token (ยังไม่ล็อกอิน) ให้เตะไปหน้า Login
+        if (!token) {
+            window.location.replace('/login');
+        }
+        // 2. ถ้าล็อกอินแล้ว แต่ "ไม่ใช่ Super Admin" ให้เตะกลับไปหน้า Dashboard
+        else if (role !== 'Super Admin') {
+            window.location.replace('/dashboard'); // หรือแจ้งเตือนก่อนค่อยเตะก็ได้ครับ
+        }
+    </script>
+</head>
+
+<body class="bg-gray-100 text-gray-800" x-data="userManager()">
+
+    <div x-show="showToast" x-transition.opacity
+         class="fixed top-5 right-5 z-[60] bg-gray-800 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-3" x-cloak>
+        <i class="fa-solid fa-circle-check text-green-400 text-xl"></i>
+        <span x-text="toastMessage" class="font-medium"></span>
+    </div>
+
+    <div x-show="isEditModalOpen"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" x-transition.opacity
+        x-cloak>
+        <div @click.away="!isSaving && (isEditModalOpen = false)"
+            class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 class="text-lg font-bold text-gray-800">
+                    <i class="fa-solid fa-user-pen text-blue-500 mr-2"></i>
+                    <span x-text="modalMode === 'create' ? 'เพิ่มผู้ใช้ใหม่' : 'แก้ไขผู้ใช้งาน'"></span>
+                </h3>
+                <button @click="isEditModalOpen = false" :disabled="isSaving" class="text-gray-400 hover:text-gray-600 disabled:opacity-50"><i
+                        class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div class="p-6 space-y-4 max-h-[70vh] overflow-y-auto no-scrollbar">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">ชื่อ - นามสกุล <span class="text-red-500">*</span></label>
+                    <input type="text" x-model="editForm.name"
+                        class="w-full border border-gray-300 rounded-lg px-4 py-2 outline-none focus:border-blue-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">อีเมล <span class="text-red-500">*</span></label>
+                    <input type="email" x-model="editForm.email" :disabled="modalMode === 'edit'"
+                        class="w-full border border-gray-300 rounded-lg px-4 py-2 outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500">
+                </div>
+                
+                <div class="space-y-4 border border-gray-100 bg-gray-50 p-4 rounded-lg">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">
+                            รหัสผ่าน 
+                            <span x-show="modalMode === 'create'" class="text-red-500">*</span>
+                            <span x-show="modalMode === 'edit'" class="text-xs text-gray-400 font-normal">(เว้นว่างไว้หากไม่ต้องการเปลี่ยน)</span>
+                        </label>
+                        <div class="relative">
+                            <input :type="showPassword ? 'text' : 'password'" x-model="editForm.password"
+                                class="w-full border border-gray-300 rounded-lg pl-4 pr-10 py-2 outline-none focus:border-blue-500 bg-white">
+                            <button type="button" @click="showPassword = !showPassword" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none">
+                                <i :class="showPassword ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye'"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">
+                            ยืนยันรหัสผ่าน
+                            <span x-show="modalMode === 'create'" class="text-red-500">*</span>
+                        </label>
+                        <div class="relative">
+                            <input :type="showConfirmPassword ? 'text' : 'password'" x-model="editForm.confirm_password"
+                                class="w-full border border-gray-300 rounded-lg pl-4 pr-10 py-2 outline-none focus:border-blue-500 bg-white">
+                            <button type="button" @click="showConfirmPassword = !showConfirmPassword" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none">
+                                <i :class="showConfirmPassword ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye'"></i>
+                            </button>
+                        </div>
+                        <p x-show="editForm.password && editForm.confirm_password && editForm.password !== editForm.confirm_password" class="text-xs text-red-500 mt-1">
+                            <i class="fa-solid fa-circle-exclamation mr-1"></i> รหัสผ่านไม่ตรงกัน
+                        </p>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">สิทธิ์การใช้งาน (Role)</label>
+                    <select x-model="editForm.role_id"
+                        class="w-full border border-gray-300 rounded-lg px-4 py-2 outline-none focus:border-blue-500">
+                        <option value="" disabled>-- เลือกสิทธิ์ --</option>
+                        <template x-for="role in rolesList" :key="role.id">
+                            <option :value="role.id" x-text="role.name"></option>
+                        </template>
+                    </select>
+                </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50">
+                <button @click="isEditModalOpen = false" :disabled="isSaving"
+                    class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg font-medium disabled:opacity-50">ยกเลิก</button>
+                <button @click="saveUser()" :disabled="isSaving"
+                    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 flex items-center min-w-[80px] justify-center">
+                    <span x-show="!isSaving">บันทึก</span>
+                    <i x-show="isSaving" class="fa-solid fa-spinner animate-spin"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="isDeleteModalOpen"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" x-transition.opacity
+        x-cloak>
+        <div @click.away="!isDeleting && (isDeleteModalOpen = false)"
+            class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6 text-center">
+            <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fa-solid fa-user-xmark text-3xl text-red-500"></i>
+            </div>
+            <h3 class="text-xl font-bold text-gray-800 mb-2">ยืนยันการลบ?</h3>
+            <p class="text-gray-500 mb-6 text-sm">คุณแน่ใจหรือไม่ว่าต้องการลบผู้ใช้งานนี้ ออกจากระบบ</p>
+            <div class="flex gap-3">
+                <button @click="isDeleteModalOpen = false" :disabled="isDeleting"
+                    class="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium disabled:opacity-50">ยกเลิก</button>
+                
+                <button @click="confirmDelete()" :disabled="isDeleting"
+                    class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium disabled:opacity-50 flex justify-center items-center">
+                    <span x-show="!isDeleting">ยืนยันลบ</span>
+                    <i x-show="isDeleting" class="fa-solid fa-spinner animate-spin"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="min-h-screen flex w-full relative overflow-hidden">
+
+        <div x-show="sidebarOpen" @click="sidebarOpen = false" x-transition.opacity
+            class="fixed inset-0 bg-black/50 z-20 md:hidden" x-cloak></div>
+
+        {% include 'nav.html' %}
+
+        <main class="flex-1 flex flex-col h-screen min-w-0 overflow-hidden">
+            <header
+                class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 md:px-8 shadow-sm">
+                <div class="flex items-center gap-3">
+                    <button @click="sidebarOpen = true"
+                        class="md:hidden text-gray-600 hover:text-gray-900 focus:outline-none">
+                        <i class="fa-solid fa-bars text-xl"></i>
+                    </button>
+                    <h1 class="text-lg md:text-xl font-semibold text-gray-800 truncate">จัดการผู้ใช้งานระบบ</h1>
+                </div>
+                {% include 'profile.html' %}
+            </header>
+
+            <div class="flex-1 overflow-y-auto p-4 md:p-8 bg-gray-50 no-scrollbar">
+
+                <div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
+                    <h2 class="text-lg font-semibold text-gray-700 w-full sm:w-auto">รายชื่อผู้ใช้งานทั้งหมด</h2>
+                    
+                    <div class="flex w-full sm:w-auto gap-3">
+                        <div class="relative group flex-1 sm:w-64">
+                            <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors"></i>
+                            <input type="text" placeholder="ค้นหาชื่อ หรือ อีเมล..." x-model.debounce.500ms="filterSearch"
+                                class="w-full pl-11 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all">
+                        </div>
+
+                        <button @click="openCreate()"
+                            class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl shadow-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap">
+                            <i class="fa-solid fa-plus"></i> <span class="hidden sm:inline">เพิ่มผู้ใช้ใหม่</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    
+                    <template x-if="isLoading">
+                        <div class="p-12 text-center text-gray-400">
+                            <i class="fa-solid fa-spinner animate-spin text-2xl mb-2 text-blue-500"></i>
+                            <p>กำลังโหลดข้อมูลผู้ใช้งาน...</p>
+                        </div>
+                    </template>
+
+                    <div class="w-full overflow-x-auto" x-show="!isLoading">
+                        <table class="w-full text-left border-collapse min-w-[600px]">
+                            <thead>
+                                <tr
+                                    class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
+                                    <th class="p-4 font-medium whitespace-nowrap text-center w-16">#</th>
+                                    <th class="p-4 font-medium whitespace-nowrap">ชื่อ - นามสกุล</th>
+                                    <th class="p-4 font-medium whitespace-nowrap">อีเมล / Username</th>
+                                    <th class="p-4 font-medium whitespace-nowrap">สิทธิ์ (Role)</th>
+                                    <th class="p-4 font-medium whitespace-nowrap text-center">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-sm divide-y divide-gray-100">
+                                <template x-if="users.length === 0">
+                                    <tr>
+                                        <td colspan="5" class="p-8 text-center text-gray-400">ไม่พบข้อมูลผู้ใช้งาน</td>
+                                    </tr>
+                                </template>
+                                <template x-for="(user, index) in users" :key="user.id">
+                                    <tr class="hover:bg-gray-50 transition-colors">
+                                        <td class="p-4 text-center font-medium text-gray-400" x-text="itemsPerPage == 0 ? index + 1 : (currentPage - 1) * itemsPerPage + (index + 1)"></td>
+                                        <td class="p-4 font-medium text-gray-800" x-text="user.name"></td>
+                                        <td class="p-4 text-gray-500" x-text="user.email"></td>
+                                        <td class="p-4">
+                                            <span
+                                                :class="user.role_name === 'Super Admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'"
+                                                class="px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap"
+                                                x-text="user.role_name"></span>
+                                        </td>
+                                        <td class="p-4 whitespace-nowrap text-center">
+                                            <button @click="openEdit(user)" title="แก้ไข"
+                                                class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 w-9 h-9 rounded-xl transition-colors mr-1">
+                                                <i class="fa-solid fa-pen text-xs"></i>
+                                            </button>
+                                            <button @click="openDelete(user.id)" title="ลบ"
+                                                class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 w-9 h-9 rounded-xl transition-colors">
+                                                <i class="fa-solid fa-trash text-xs"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="p-4 flex flex-col lg:flex-row justify-between items-center gap-4 border-t border-gray-100" x-show="!isLoading && totalItems > 0" x-cloak>
+                        <div class="flex flex-col sm:flex-row items-center gap-3 sm:gap-6 text-sm text-gray-500 w-full lg:w-auto text-center sm:text-left">
+                            
+                            <div>
+                                <template x-if="itemsPerPage == 0">
+                                    <span>แสดงข้อมูลทั้งหมด <span class="font-bold text-gray-800" x-text="totalItems"></span> รายการ</span>
+                                </template>
+                                <template x-if="itemsPerPage > 0">
+                                    <span>
+                                        แสดง <span class="font-bold text-gray-800" x-text="(currentPage - 1) * itemsPerPage + 1"></span>
+                                        ถึง <span class="font-bold text-gray-800" x-text="Math.min(currentPage * itemsPerPage, totalItems)"></span>
+                                        จาก <span class="font-bold text-gray-800" x-text="totalItems"></span> รายการ
+                                    </span>
+                                </template>
+                            </div>
+
+                            <div class="flex items-center gap-2 sm:border-l sm:border-gray-300 sm:pl-6">
+                                <span>แสดงหน้าละ:</span>
+                                <select x-model.number="itemsPerPage" @change="currentPage = 1; fetchUsers()" class="border border-gray-300 rounded-lg px-2 py-1.5 outline-none focus:border-blue-500 bg-white cursor-pointer font-medium text-gray-700">
+                                    <option value="10">10</option>
+                                    <option value="20">20</option>
+                                    <option value="50">50</option>
+                                    <option value="0">ทั้งหมด</option> </select>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-2 w-full lg:w-auto justify-center" x-show="itemsPerPage > 0">
+                            <button @click="prevPage()" :disabled="currentPage === 1" class="px-3 py-1.5 sm:px-4 sm:py-2 text-sm font-medium border border-gray-300 rounded-lg bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center">
+                                <i class="fa-solid fa-chevron-left mr-1"></i> ก่อนหน้า
+                            </button>
+                            <div class="flex items-center px-4 py-2 text-sm font-bold bg-blue-50 text-blue-600 rounded-lg border border-blue-100 whitespace-nowrap">
+                                หน้า <span x-text="currentPage" class="mx-1"></span> จาก <span x-text="totalPages" class="ml-1"></span>
+                            </div>
+                            <button @click="nextPage()" :disabled="currentPage >= totalPages" class="px-3 py-1.5 sm:px-4 sm:py-2 text-sm font-medium border border-gray-300 rounded-lg bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center">
+                                ถัดไป <i class="fa-solid fa-chevron-right ml-1"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function userManager() {
+            return {
+                sidebarOpen: false,
+                users: [], 
+                rolesList: [],
+                isLoading: false,
+                isDeleting: false,
+                isSaving: false,
+                filterSearch: '',
+                
+                currentPage: 1,
+                itemsPerPage: 10,
+                totalItems: 0,
+                totalPages: 1,
+
+                // Modal & Forms
+                isEditModalOpen: false,
+                isDeleteModalOpen: false,
+                modalMode: 'create', 
+                editForm: { id: null, name: '', email: '', password: '', confirm_password: '', role_id: '' },
+                deleteTargetId: null,
+
+                showPassword: false,
+                showConfirmPassword: false,
+
+                showToast: false,
+                toastMessage: '',
+
+                async init() {
+                    if (!localStorage.getItem('token')) {
+                        window.location.href = '/login';
+                        return;
+                    }
+
+                    this.$watch('filterSearch', () => { 
+                        this.currentPage = 1; 
+                        this.fetchUsers(); 
+                    });
+
+                    await this.fetchRolesList();
+                    await this.fetchUsers();
+                },
+
+                triggerToast(message) {
+                    this.toastMessage = message;
+                    this.showToast = true;
+                    setTimeout(() => { this.showToast = false; }, 3000);
+                },
+
+                // =====================================
+                // 🌐 API Functions
+                // =====================================
+                async fetchRolesList() {
+                    try {
+                        const response = await fetch('/api/roles', {
+                            method: 'GET',
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                                'Content-Type': 'application/json'
+                            }
+                        });
+                        if (response.ok) {
+                            const json = await response.json();
+                            this.rolesList = json.data || [];
+                        }
+                    } catch (error) {
+                        console.error('Error fetching roles list:', error);
+                    }
+                },
+
+                async fetchUsers() {
+                    this.isLoading = true;
+                    try {
+                        const apiLimit = this.itemsPerPage === 0 ? 9999 : this.itemsPerPage;
+
+                        const params = new URLSearchParams({
+                            search: this.filterSearch,
+                            page: this.currentPage,
+                            limit: apiLimit
+                        });
+
+                        const response = await fetch(`/api/users?${params.toString()}`, {
+                            method: 'GET',
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                                'Content-Type': 'application/json'
+                            }
+                        });
+
+                        if (response.status === 401) {
+                            alert('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
+                            this.logout();
+                            return;
+                        }
+
+                        if (!response.ok) throw new Error('Fetch failed');
+
+                        const json = await response.json();
+                        
+                        this.totalItems = json.pagination.total_items;
+                        this.totalPages = this.itemsPerPage === 0 ? 1 : json.pagination.total_pages;
+
+                        this.users = json.data.map(item => ({
+                            id: item.id,
+                            name: item.name,
+                            email: item.email,
+                            role_id: item.role_id,
+                            role_name: item.role_name 
+                        }));
+
+                    } catch (error) {
+                        console.error('Error fetching users:', error);
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                nextPage() {
+                    if (this.currentPage < this.totalPages) {
+                        this.currentPage++;
+                        this.fetchUsers();
+                    }
+                },
+                prevPage() {
+                    if (this.currentPage > 1) {
+                        this.currentPage--;
+                        this.fetchUsers();
+                    }
+                },
+
+                // =====================================
+                // ✏️ Create & Edit
+                // =====================================
+                openCreate() {
+                    this.modalMode = 'create';
+                    const defaultRole = this.rolesList.length > 0 ? this.rolesList[0].id : '';
+                    this.editForm = { id: null, name: '', email: '', password: '', confirm_password: '', role_id: defaultRole };
+                    this.showPassword = false;
+                    this.showConfirmPassword = false;
+                    this.isEditModalOpen = true;
+                },
+
+                openEdit(user) {
+                    this.modalMode = 'edit';
+                    this.editForm = { ...user, password: '', confirm_password: '', role_id: user.role_id };
+                    this.showPassword = false;
+                    this.showConfirmPassword = false;
+                    this.isEditModalOpen = true;
+                },
+                
+                async saveUser() {
+                    if (!this.editForm.name || !this.editForm.email || !this.editForm.role_id) {
+                        alert("กรุณากรอกข้อมูลให้ครบถ้วน");
+                        return;
+                    }
+
+                    if (this.modalMode === 'create') {
+                        if (!this.editForm.password || !this.editForm.confirm_password) {
+                            alert("กรุณากรอกรหัสผ่านและยืนยันรหัสผ่าน");
+                            return;
+                        }
+                    }
+
+                    // เช็ครหัสผ่านไม่ตรงกัน (ใช้เช็คตอนสร้างใหม่ และตอนที่พิมพ์รหัสแก้ไข)
+                    if (this.editForm.password || this.editForm.confirm_password) {
+                        if (this.editForm.password !== this.editForm.confirm_password) {
+                            alert("รหัสผ่านไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง");
+                            return;
+                        }
+                    }
+
+                    this.isSaving = true;
+                    try {
+                        const url = this.modalMode === 'create' ? '/api/users' : `/api/users/${this.editForm.id}`;
+                        const method = this.modalMode === 'create' ? 'POST' : 'PUT';
+                        
+                        const bodyData = {
+                            full_name: this.editForm.name,
+                            email: this.editForm.email,
+                            role_id: parseInt(this.editForm.role_id)
+                        };
+
+                        // แนบรหัสผ่านไปอัปเดต ถ้ามีการพิมพ์
+                        if (this.editForm.password) {
+                            bodyData.password = this.editForm.password;
+                        }
+
+                        const response = await fetch(url, {
+                            method: method,
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(bodyData)
+                        });
+
+                        if (response.status === 401) {
+                            this.logout();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            const errData = await response.json();
+                            throw new Error(errData.detail || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+                        }
+
+                        this.isEditModalOpen = false;
+                        this.triggerToast(this.modalMode === 'create' ? 'เพิ่มผู้ใช้สำเร็จแล้ว!' : 'อัปเดตข้อมูลสำเร็จ!');
+                        await this.fetchUsers();
+
+                    } catch (error) {
+                        alert(error.message);
+                    } finally {
+                        this.isSaving = false;
+                    }
+                },
+
+                // =====================================
+                // 🗑️ Delete
+                // =====================================
+                openDelete(id) {
+                    this.deleteTargetId = id;
+                    this.isDeleteModalOpen = true;
+                },
+                
+                async confirmDelete() {
+                    if (!this.deleteTargetId) return;
+                    
+                    this.isDeleting = true; 
+                    try {
+                        const response = await fetch(`/api/users/${this.deleteTargetId}`, {
+                            method: 'DELETE',
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                                'Content-Type': 'application/json'
+                            }
+                        });
+
+                        if (response.status === 401) {
+                            this.logout();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.detail || 'เกิดข้อผิดพลาดในการลบผู้ใช้งาน');
+                        }
+
+                        this.isDeleteModalOpen = false;
+                        this.deleteTargetId = null;
+
+                        this.triggerToast('ลบผู้ใช้งานเรียบร้อยแล้ว!');
+
+                        if (this.users.length === 1 && this.currentPage > 1) {
+                            this.currentPage--;
+                        }
+                        
+                        await this.fetchUsers();
+
+                    } catch (error) {
+                        console.error('Delete error:', error);
+                        alert(error.message);
+                    } finally {
+                        this.isDeleting = false;
+                    }
+                },
+
+                logout() {
+                    localStorage.removeItem('token');
+                    window.location.href = '/login';
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>

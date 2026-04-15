@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบหลังบ้าน - Slip Scanner (Live Data)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap');
+
+        body { font-family: 'Kanit', sans-serif; }
+        [x-cloak] { display: none !important; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+
+<body class="bg-gray-100 text-gray-800" x-data="slipManager()">
+
+    <div x-show="isImageModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" x-transition.opacity x-cloak>
+        <div @click.away="closeImage()" class="relative max-w-4xl w-full p-4 flex justify-center">
+            <button @click="closeImage()" class="absolute top-0 right-4 text-white hover:text-gray-300 text-4xl font-bold z-50">&times;</button>
+            <img :src="selectedImage" class="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl border-4 border-white/10">
+        </div>
+    </div>
+
+    <div x-show="isEditModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" x-transition.opacity x-cloak>
+        <div @click.away="isEditModalOpen = false" class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 class="text-lg font-bold text-gray-800"><i class="fa-solid fa-pen text-blue-500 mr-2"></i>แก้ไขสถานะสลิป</h3>
+                <button @click="isEditModalOpen = false" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div class="p-6">
+                <p class="text-sm text-gray-500 mb-4">ID สลิป: <span class="font-semibold text-gray-800" x-text="editForm.id"></span></p>
+                <select x-model="editForm.status" class="w-full border border-gray-300 rounded-lg px-4 py-2 outline-none focus:border-blue-500">
+                    <option value="ผ่าน">ผ่าน</option>
+                    <option value="ไม่ผ่าน">ไม่ผ่าน</option>
+                </select>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50">
+                <button @click="isEditModalOpen = false" class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg font-medium">ยกเลิก</button>
+                <button @click="saveSlipEdit()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium">บันทึก</button>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="isDeleteModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" x-transition.opacity x-cloak>
+        <div @click.away="isDeleteModalOpen = false" class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6 text-center">
+            <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fa-solid fa-trash-can text-3xl text-red-500"></i>
+            </div>
+            <h3 class="text-xl font-bold text-gray-800 mb-2">ยืนยันการลบ?</h3>
+            <p class="text-gray-500 mb-6 text-sm">คุณแน่ใจหรือไม่ว่าต้องการลบสลิปรายการนี้ การกระทำนี้ไม่สามารถย้อนกลับได้</p>
+            <div class="flex gap-3">
+                <button @click="isDeleteModalOpen = false" class="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium">ยกเลิก</button>
+                <button @click="confirmDelete()" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium">ยืนยันลบ</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="min-h-screen flex w-full relative overflow-hidden">
+
+        <div x-show="sidebarOpen" @click="sidebarOpen = false" x-transition.opacity class="fixed inset-0 bg-black/50 z-20 md:hidden" x-cloak></div>
+
+        {% include 'nav.html' %}
+
+        <main class="flex-1 flex flex-col h-screen min-w-0 overflow-hidden">
+            <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 md:px-8 shadow-sm">
+                <div class="flex items-center gap-3">
+                    <button @click="sidebarOpen = true" class="md:hidden text-gray-600 hover:text-gray-900 focus:outline-none">
+                        <i class="fa-solid fa-bars text-xl"></i>
+                    </button>
+                    <h1 class="text-lg md:text-xl font-semibold text-gray-800 truncate">รายการสแกนสลิป</h1>
+                </div>
+
+                {% include 'profile.html' %}
+            </header>
+
+            <div class="flex-1 overflow-y-auto p-4 md:p-8 bg-gray-50 no-scrollbar">
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 mb-6 md:mb-8">
+                    <div class="bg-white p-5 md:p-6 rounded-xl shadow-sm border border-l-4 border-l-blue-500">
+                        <div class="text-sm text-gray-500 mb-1">รายการที่พบ (ทั้งหมด)</div>
+                        <div class="text-2xl md:text-3xl font-bold text-gray-800" x-text="totalItems">0</div>
+                    </div>
+                    <div class="bg-white p-5 md:p-6 rounded-xl shadow-sm border border-l-4 border-l-green-500">
+                        <div class="text-sm text-gray-500 mb-1">สลิปสำเร็จ (หน้าปัจจุบัน)</div>
+                        <div class="text-2xl md:text-3xl font-bold text-green-600" x-text="slips.filter(s => s.status.toLowerCase() === 'ผ่าน').length">0</div>
+                    </div>
+                    <div class="bg-white p-5 md:p-6 rounded-xl shadow-sm border border-l-4 border-l-red-500 sm:col-span-2 lg:col-span-1">
+                        <div class="text-sm text-gray-500 mb-1">สลิปผิดพลาด (หน้าปัจจุบัน)</div>
+                        <div class="text-2xl md:text-3xl font-bold text-red-500" x-text="slips.filter(s => s.status.toLowerCase() !== 'ผ่าน').length">0</div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div class="p-5 border-b border-gray-100 bg-white/50 backdrop-blur-md">
+                        <div class="flex flex-col xl:flex-row xl:items-end gap-5">
+                            <div class="flex flex-col gap-1.5 flex-1 min-w-[250px]">
+                                <label class="font-semibold text-gray-600 text-xs uppercase tracking-wider ml-1">ค้นหา</label>
+                                <div class="relative group">
+                                    <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors"></i>
+                                    <input type="text" placeholder="ชื่อไฟล์ หรือข้อมูลสลิป..." x-model.debounce.500ms="filterSearch" class="w-full pl-11 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all placeholder:text-gray-400">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 md:flex md:flex-row gap-4">
+                                <div class="flex flex-col gap-1.5 w-full md:w-44">
+                                    <label class="font-semibold text-gray-600 text-xs uppercase tracking-wider ml-1">ช่วงเวลา</label>
+                                    <div class="relative">
+                                        <select x-model="filterTime" class="w-full appearance-none pl-4 pr-10 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-700 focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none cursor-pointer transition-all">
+                                            <option value="all">ทั้งหมด</option>
+                                            <option value="1h">1 ชม. ล่าสุด</option>
+                                            <option value="6h">6 ชม. ล่าสุด</option>
+                                            <option value="1d">1 วันล่าสุด</option>
+                                            <option value="1w">1 สัปดาห์ล่าสุด</option>
+                                            <option value="1m">1 เดือนล่าสุด</option>
+                                        </select>
+                                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-gray-400"><i class="fa-solid fa-chevron-down text-[10px]"></i></div>
+                                    </div>
+                                </div>
+                                <div class="flex flex-col gap-1.5 w-full md:w-44">
+                                    <label class="font-semibold text-gray-600 text-xs uppercase tracking-wider ml-1">สถานะ</label>
+                                    <div class="relative">
+                                        <select x-model="filterStatus" class="w-full appearance-none pl-4 pr-10 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-700 focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none cursor-pointer transition-all">
+                                            <option value="all">ทั้งหมด</option>
+                                            <option value="ผ่าน">ผ่าน</option>
+                                            <option value="ไม่ผ่าน">ไม่ผ่าน</option>
+                                        </select>
+                                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-gray-400"><i class="fa-solid fa-chevron-down text-[10px]"></i></div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-end gap-2">
+                                <button @click="downloadAllSlips()" :disabled="isDownloading || slips.length === 0" class="h-[42px] px-4 flex items-center justify-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-600 hover:text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100 rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed" title="ดาวน์โหลดรูปทั้งหมดในหน้านี้ (.zip)">
+                                    <i class="fa-solid fa-download" :class="isDownloading ? 'animate-bounce' : ''"></i>
+                                    <span class="text-sm font-medium whitespace-nowrap">โหลดหน้านี้ (<span x-text="slips.length"></span>)</span>
+                                </button>
+
+                                <button @click="fetchSlips()" class="h-[42px] w-12 xl:w-11 flex items-center justify-center gap-2 px-4 xl:px-0 bg-white border border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 rounded-xl transition-all shadow-sm active:scale-95" title="รีเฟรชข้อมูล">
+                                    <i class="fa-solid fa-rotate" :class="isLoading ? 'animate-spin' : ''"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <template x-if="isLoading">
+                            <div class="p-12 text-center text-gray-400 bg-white shadow-sm border border-gray-100">
+                                <i class="fa-solid fa-spinner animate-spin text-2xl mb-2 text-blue-500"></i>
+                                <p>กำลังโหลดข้อมูล...</p>
+                            </div>
+                        </template>
+
+                        <template x-if="!isLoading && slips.length === 0">
+                            <div class="p-12 text-center text-gray-400 bg-white shadow-sm border border-gray-100">
+                                ไม่พบข้อมูลที่ตรงกับเงื่อนไข
+                            </div>
+                        </template>
+
+                        <div class="md:hidden space-y-4 p-4" x-show="!isLoading && slips.length > 0">
+                            <template x-for="slip in slips" :key="slip.id">
+                                <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3">
+                                    <div class="flex gap-4">
+                                        <div @click="openImage(slip.name)" class="w-20 h-20 bg-gray-200 rounded-lg overflow-hidden shrink-0 cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all">
+                                            <img :src="slip.name" class="w-full h-full object-cover" @error="$el.src='https://placehold.co/100x100?text=No+Image'">
+                                        </div>
+                                        <div class="flex-1 flex flex-col justify-center">
+                                            <div class="flex justify-between items-start mb-1">
+                                                <span :class="slip.status.toLowerCase() === 'ผ่าน' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'" class="px-2 py-1 rounded-md text-[10px] font-semibold uppercase" x-text="slip.status"></span>
+                                                <div class="flex gap-2">
+                                                    <button @click="downloadSingleSlip(slip)" class="text-emerald-600 bg-emerald-50 p-1.5 rounded-lg active:bg-emerald-100"><i class="fa-solid fa-download text-xs"></i></button>
+                                                    <button @click="editSlip(slip.id)" class="text-blue-500 bg-blue-50 p-1.5 rounded-lg active:bg-blue-100"><i class="fa-solid fa-pen text-xs"></i></button>
+                                                    <button @click="deleteSlip(slip.id)" class="text-red-500 bg-red-50 p-1.5 rounded-lg active:bg-red-100"><i class="fa-solid fa-trash text-xs"></i></button>
+                                                </div>
+                                            </div>
+                                            <div class="text-sm text-gray-600">AI มั่นใจ: <span class="font-medium" x-text="slip.confidence"></span></div>
+                                            <div class="text-xs text-gray-400 mt-1"><i class="fa-regular fa-clock mr-1"></i><span x-text="slip.time"></span></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+
+                        <div class="hidden md:block w-full overflow-x-auto bg-white" x-show="!isLoading && slips.length > 0">
+                            <table class="w-full text-left border-collapse min-w-[600px]">
+                                <thead>
+                                    <tr class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
+                                        <th class="p-4 font-medium whitespace-nowrap text-center w-16">#</th>
+                                        <th class="p-4 font-medium whitespace-nowrap">รูปภาพ</th>
+                                        <th class="p-4 font-medium whitespace-nowrap">สถานะ</th>
+                                        <th class="p-4 font-medium whitespace-nowrap">ความมั่นใจ AI</th>
+                                        <th class="p-4 font-medium whitespace-nowrap">เวลาที่สแกน</th>
+                                        <th class="p-4 font-medium whitespace-nowrap text-center">จัดการ</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="text-sm divide-y divide-gray-100">
+                                    <template x-for="(slip, index) in slips" :key="slip.id">
+                                        <tr class="hover:bg-gray-50 transition-colors">
+                                            <td class="p-4 text-center font-medium text-gray-400" x-text="(currentPage - 1) * itemsPerPage + (index + 1)"></td>
+                                            <td class="p-4">
+                                                <div @click="openImage(slip.name)" class="w-14 h-14 bg-gray-200 rounded-xl overflow-hidden border border-gray-200 shrink-0 cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all">
+                                                    <img :src="slip.name" class="w-full h-full object-cover" @error="$el.src='https://placehold.co/100x100?text=No+Image'">
+                                                </div>
+                                            </td>
+                                            <td class="p-4">
+                                                <span :class="slip.status.toLowerCase() === 'ผ่าน' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'" class="px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap uppercase" x-text="slip.status"></span>
+                                            </td>
+                                            <td class="p-4 text-gray-600 font-medium" x-text="slip.confidence"></td>
+                                            <td class="p-4 text-gray-500 whitespace-nowrap" x-text="slip.time"></td>
+                                            <td class="p-4 whitespace-nowrap text-center">
+                                                <button @click="downloadSingleSlip(slip)" title="ดาวน์โหลด" class="text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 w-9 h-9 rounded-xl transition-colors mr-1">
+                                                    <i class="fa-solid fa-download text-xs"></i>
+                                                </button>
+                                                <button @click="editSlip(slip.id)" title="แก้ไข" class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 w-9 h-9 rounded-xl transition-colors mr-1">
+                                                    <i class="fa-solid fa-pen text-xs"></i>
+                                                </button>
+                                                <button @click="deleteSlip(slip.id)" title="ลบ" class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 w-9 h-9 rounded-xl transition-colors">
+                                                    <i class="fa-solid fa-trash text-xs"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="p-4 flex flex-col lg:flex-row justify-between items-center gap-4 border-t border-gray-100" x-show="!isLoading && totalItems > 0" x-cloak>
+                            <div class="flex flex-col sm:flex-row items-center gap-3 sm:gap-6 text-sm text-gray-500 w-full lg:w-auto text-center sm:text-left">
+                                <div>แสดง <span class="font-bold text-gray-800" x-text="(currentPage - 1) * itemsPerPage + 1"></span> ถึง <span class="font-bold text-gray-800" x-text="Math.min(currentPage * itemsPerPage, totalItems)"></span> จาก <span class="font-bold text-gray-800" x-text="totalItems"></span> รายการ</div>
+                                <div class="flex items-center gap-2 sm:border-l sm:border-gray-300 sm:pl-6">
+                                    <span>แสดงหน้าละ:</span>
+                                    <select x-model.number="itemsPerPage" @change="currentPage = 1; fetchSlips()" class="border border-gray-300 rounded-lg px-2 py-1.5 outline-none focus:border-blue-500 bg-white cursor-pointer font-medium text-gray-700">
+                                        <option value="10">10</option>
+                                        <option value="20">20</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="flex gap-2 w-full lg:w-auto justify-center">
+                                <button @click="prevPage()" :disabled="currentPage === 1" class="px-3 py-1.5 sm:px-4 sm:py-2 text-sm font-medium border border-gray-300 rounded-lg bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"><i class="fa-solid fa-chevron-left mr-1"></i> ก่อนหน้า</button>
+                                <div class="flex items-center px-4 py-2 text-sm font-bold bg-blue-50 text-blue-600 rounded-lg border border-blue-100 whitespace-nowrap">หน้า <span x-text="currentPage" class="mx-1"></span> จาก <span x-text="totalPages" class="ml-1"></span></div>
+                                <button @click="nextPage()" :disabled="currentPage >= totalPages" class="px-3 py-1.5 sm:px-4 sm:py-2 text-sm font-medium border border-gray-300 rounded-lg bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center">ถัดไป <i class="fa-solid fa-chevron-right ml-1"></i></button>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function slipManager() {
+            return {
+                sidebarOpen: false,
+                slips: [],
+                isLoading: false,
+                isDownloading: false, // 🌟 สถานะตอนกำลังโหลดไฟล์
+                filterSearch: '',
+                filterTime: 'all',
+                filterStatus: 'all',
+
+                currentPage: 1,
+                itemsPerPage: 10,
+                totalItems: 0,
+                totalPages: 1,
+
+                isImageModalOpen: false,
+                selectedImage: null,
+
+                isEditModalOpen: false,
+                isDeleteModalOpen: false,
+                editForm: { id: null, status: 'ผ่าน' },
+                deleteTargetId: null,
+
+                apiUrl: '/api/slips',
+
+                // 🌟 ฟังก์ชันโหลดไฟล์เดี่ยว
+                async downloadSingleSlip(slip) {
+                    try {
+                        // ดึงรูปมาเป็น Blob เพื่อบังคับให้บราวเซอร์ดาวน์โหลด (แก้ปัญหาเปิดหน้าต่างใหม่)
+                        const response = await fetch(slip.name);
+                        const blob = await response.blob();
+                        const url = window.URL.createObjectURL(blob);
+                        
+                        const a = document.createElement('a');
+                        a.style.display = 'none';
+                        a.href = url;
+                        // ตั้งชื่อไฟล์ตาม URL หรือให้เป็น slip_id
+                        const filename = slip.name.split('/').pop() || `slip_${slip.id}.jpg`;
+                        a.download = filename;
+                        
+                        document.body.appendChild(a);
+                        a.click();
+                        
+                        window.URL.revokeObjectURL(url);
+                        a.remove();
+                    } catch (error) {
+                        console.error("ดาวน์โหลดล้มเหลว:", error);
+                        // ถ้าติด CORS ก็ให้เปิดรูปในแท็บใหม่แทน
+                        window.open(slip.name, '_blank');
+                    }
+                },
+
+                // 🌟 ฟังก์ชันโหลดไฟล์ทั้งหมดในหน้าเว็บปัจจุบัน (Zip)
+                async downloadAllSlips() {
+                    if (this.slips.length === 0) return;
+                    this.isDownloading = true;
+
+                    try {
+                        const zip = new JSZip();
+                        const folderName = `slips_page_${this.currentPage}`;
+                        const imgFolder = zip.folder(folderName);
+                        
+                        // วนลูปโหลดรูปภาพทีละรูปเก็บไว้ในหน่วยความจำ
+                        const promises = this.slips.map(async (slip) => {
+                            try {
+                                const response = await fetch(slip.name);
+                                const blob = await response.blob();
+                                const filename = slip.name.split('/').pop() || `slip_${slip.id}.jpg`;
+                                imgFolder.file(filename, blob);
+                            } catch (e) {
+                                console.error(`โหลดไฟล์ ${slip.name} ไม่สำเร็จ:`, e);
+                            }
+                        });
+                        
+                        // รอจนโหลดรูปครบ
+                        await Promise.all(promises);
+                        
+                        // แพ็กเป็นไฟล์ Zip และดาวน์โหลด
+                        const content = await zip.generateAsync({ type: "blob" });
+                        const url = window.URL.createObjectURL(content);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `slip_export_${new Date().getTime()}.zip`;
+                        
+                        document.body.appendChild(a);
+                        a.click();
+                        
+                        window.URL.revokeObjectURL(url);
+                        a.remove();
+                    } catch (error) {
+                        console.error("การสร้าง Zip ล้มเหลว:", error);
+                        alert("เกิดข้อผิดพลาดในการดาวน์โหลดไฟล์ทั้งหมด");
+                    } finally {
+                        this.isDownloading = false;
+                    }
+                },
+
+                // (โค้ดเดิมด้านล่าง)
+                nextPage() {
+                    if (this.currentPage < this.totalPages) {
+                        this.currentPage++;
+                        this.fetchSlips();
+                    }
+                },
+                prevPage() {
+                    if (this.currentPage > 1) {
+                        this.currentPage--;
+                        this.fetchSlips();
+                    }
+                },
+
+                async init() {
+                    this.$watch('filterSearch', () => { this.currentPage = 1; this.fetchSlips(); });
+                    this.$watch('filterTime', () => { this.currentPage = 1; this.fetchSlips(); });
+                    this.$watch('filterStatus', () => { this.currentPage = 1; this.fetchSlips(); });
+
+                    await this.fetchSlips();
+                    await this.fetchStats();
+
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/slips`);
+                    ws.onmessage = (event) => {
+                        const msg = JSON.parse(event.data);
+                        if (msg.event === "new_slip") {
+                            console.log("🔥 มีสลิปใหม่เข้ามา! สถานะ:", msg.status);
+                            this.fetchStats();
+                            if (this.currentPage === 1) {
+                                this.fetchSlips();
+                            }
+                        }
+                    };
+                    ws.onclose = () => { console.log("🔌 ขาดการเชื่อมต่อ WebSocket"); };
+                },
+
+                openImage(url) {
+                    this.selectedImage = url;
+                    this.isImageModalOpen = true;
+                },
+                closeImage() {
+                    this.isImageModalOpen = false;
+                    this.selectedImage = null;
+                },
+
+                editSlip(id) {
+                    const slip = this.slips.find(s => s.id === id);
+                    this.editForm = { id: id, status: slip ? slip.status : 'ผ่าน' };
+                    this.isEditModalOpen = true; 
+                },
+
+                async saveSlipEdit() {
+                    this.isEditModalOpen = false;
+                },
+
+                deleteSlip(id) {
+                    this.deleteTargetId = id;
+                    this.isDeleteModalOpen = true; 
+                },
+
+                async confirmDelete() {
+                    this.slips = this.slips.filter(s => s.id !== this.deleteTargetId);
+                    this.totalItems--;
+
+                    if (this.slips.length === 0 && this.currentPage > 1) {
+                        this.currentPage--;
+                        this.fetchSlips();
+                    }
+                    this.isDeleteModalOpen = false;
+                },
+
+                async fetchStats() {
+                    try {
+                        const response = await fetch('/api/stats', {
+                            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        if (response.ok) {
+                            const stats = await response.json();
+                            console.log("อัปเดตสถิติ:", stats);
+                        }
+                    } catch (error) {
+                        console.error('Error fetching stats:', error);
+                    }
+                },
+
+                async fetchSlips() {
+                    this.isLoading = true;
+                    try {
+                        const params = new URLSearchParams({
+                            search: this.filterSearch,
+                            time: this.filterTime,
+                            status: this.filterStatus,
+                            page: this.currentPage,
+                            limit: this.itemsPerPage
+                        });
+                        const response = await fetch(`${this.apiUrl}?${params.toString()}`, {
+                            method: 'GET',
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                                'Content-Type': 'application/json'
+                            }
+                        });
+                        if (response.status === 401) {
+                            alert('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
+                            window.location.href = 'login.html';
+                            return;
+                        }
+                        if (!response.ok) throw new Error('Fetch failed');
+                        const json = await response.json();
+                        this.totalItems = json.pagination.total_items;
+                        this.totalPages = json.pagination.total_pages;
+                        this.slips = json.data.map(item => {
+                            let conf = Number(item.confidence);
+                            if (conf <= 1) conf = conf * 100;
+                            return {
+                                id: item.id,
+                                name: item.filename,
+                                status: item.status_name,
+                                confidence: conf.toFixed(2) + '%',
+                                time: new Date(item.created_at).toLocaleString('th-TH', {
+                                    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+                                }),
+                                img: item.filename.startsWith('http') ? item.filename : `https://pub-600e8a1da8f94410bd40b5d216e22bc0.r2.dev/${item.filename}`
+                            };
+                        });
+                    } catch (error) {
+                        console.error('Error:', error);
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                async logout() {
+                    try {
+                        await fetch('/api/logout', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                        });
+                    } catch (e) {
+                        console.error(e);
+                    } finally {
+                        localStorage.removeItem('token');
+                        window.location.href = 'login';
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>

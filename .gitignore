@@ -1,3 +1,4 @@
 __pycache__/
 *.pyc
 slip_checker_model.pth
+.env

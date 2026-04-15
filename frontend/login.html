@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>เข้าสู่ระบบ - Slip Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap');
+        body { font-family: 'Kanit', sans-serif; }
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800" x-data="{ 
+    email: '', 
+    password: '', 
+    showToast: false,
+    errorMessage: '',
+    isLoading: false,
+
+    init() {
+        // เช็คว่ามี Error ส่งมาจาก Google Auth หรือไม่
+        const urlParams = new URLSearchParams(window.location.search);
+        const error = urlParams.get('error');
+        if (error === 'account_suspended') this.errorMessage = 'บัญชีของคุณถูกระงับการใช้งาน';
+        else if (error === 'google_auth_failed') this.errorMessage = 'การเข้าสู่ระบบด้วย Google ล้มเหลว';
+        else if (error === 'missing_token') this.errorMessage = 'ไม่พบข้อมูล Token กรุณาเข้าสู่ระบบใหม่';
+
+        else if (error === 'user_not_found') this.errorMessage = 'ไม่พบข้อมูลอีเมลนี้ในระบบ กรุณาติดต่อแอดมิน';
+        
+        // ถ้ามี token อยู่แล้วให้เด้งไป Dashboard เลย
+        if (localStorage.getItem('token')) {
+            window.location.href = '/dashboard';
+        }
+    },
+
+    async handleLogin() {
+        this.isLoading = true;
+        this.errorMessage = '';
+        
+        const formData = new URLSearchParams();
+        formData.append('username', this.email); 
+        formData.append('password', this.password);
+
+        try {
+            const response = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+            }
+
+            // เซฟ Token และ Role ลง LocalStorage
+            localStorage.setItem('token', data.access_token);
+            localStorage.setItem('role', data.user_role); 
+            
+            this.showToast = true;
+            setTimeout(() => {
+                window.location.href = '/dashboard';
+            }, 1500);
+
+        } catch (err) {
+            this.errorMessage = err.message;
+        } finally {
+            this.isLoading = false;
+        }
+    },
+
+    //  ฟังก์ชันสำหรับ Login ด้วย Gmail
+    loginWithGmail() {
+        this.isLoading = true;
+        // เด้งไปที่ Route ของ FastAPI ที่เราสร้างไว้เชื่อมกับ Google
+        window.location.href = '/api/auth/google/login';
+    }
+}">
+
+    <div x-cloak x-show="showToast" 
+         x-transition class="fixed top-5 right-5 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50">
+        <i class="fa-solid fa-circle-check text-xl"></i>
+        <div>
+            <div class="font-semibold">เข้าสู่ระบบสำเร็จ!</div>
+            <div class="text-sm text-green-100">กำลังพาท่านไปยังหน้าแดชบอร์ด...</div>
+        </div>
+    </div>
+
+    <template x-if="errorMessage">
+        <div class="fixed top-5 left-1/2 -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50">
+            <i class="fa-solid fa-circle-exclamation"></i>
+            <span x-text="errorMessage"></span>
+            <button @click="errorMessage = ''" class="ml-4 text-red-200 hover:text-white">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+    </template>
+
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
+            <div class="text-center mb-8">
+                <div class="w-16 h-16 bg-blue-600 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
+                    <i class="fa-solid fa-bolt text-3xl"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-gray-900">Slip Scanner</h2>
+                <p class="text-sm text-gray-500 mt-1">เข้าสู่ระบบเพื่อใช้งานระบบหลังบ้าน</p>
+            </div>
+            
+            <form @submit.prevent="handleLogin" class="space-y-5">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">อีเมลผู้ใช้งาน</label>
+                    <input type="email" x-model="email" required :disabled="isLoading"
+                           placeholder="admin@example.com" 
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all disabled:bg-gray-100">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">รหัสผ่าน</label>
+                    <input type="password" x-model="password" required :disabled="isLoading"
+                           placeholder="••••••••" 
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all disabled:bg-gray-100">
+                </div>
+                
+                <button type="submit" 
+                        :disabled="isLoading"
+                        class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium py-2.5 rounded-lg transition-colors shadow-md flex justify-center items-center gap-2">
+                    <template x-if="isLoading">
+                        <i class="fa-solid fa-circle-notch animate-spin"></i>
+                    </template>
+                    <span x-text="isLoading ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบ'"></span>
+                </button>
+            </form>
+
+            <div class="mt-6 mb-6 flex items-center justify-center">
+                <div class="h-px bg-gray-200 flex-1"></div>
+                <span class="px-4 text-sm text-gray-400">หรือ</span>
+                <div class="h-px bg-gray-200 flex-1"></div>
+            </div>
+
+            <button type="button" @click="loginWithGmail" :disabled="isLoading"
+                    class="w-full bg-white border border-gray-300 hover:bg-gray-50 disabled:bg-gray-100 text-gray-700 font-medium py-2.5 rounded-lg transition-colors shadow-sm flex justify-center items-center gap-3">
+                <svg class="w-5 h-5" viewBox="0 0 24 24">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                </svg>
+                เข้าสู่ระบบด้วย Gmail
+            </button>
+            
+            <div class="mt-8 text-center text-xs text-gray-400">
+                &copy; 2024 Slip Scanner AI System
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
