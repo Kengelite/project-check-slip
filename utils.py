@@ -61,7 +61,7 @@ slip_model = torch.load("slip_checker_model.pth", map_location=device, weights_o
 slip_model.eval()
 
 ROBOFLOW_API_KEY = "YSmhK0fmys5XBp6l0e2i"
-ROBOFLOW_SLIP_MODEL_ID = "dection-slip/2"
+ROBOFLOW_SLIP_MODEL_ID = "dection-slip/3"
 rf_slip_model = get_model(model_id=ROBOFLOW_SLIP_MODEL_ID, api_key=ROBOFLOW_API_KEY)
 
 test_transform = transforms.Compose([
@@ -113,41 +113,46 @@ def process_slip_logic(img_cv2: np.ndarray) -> dict:
             "details": stage1_result # ส่งรายละเอียด Model 1 กลับไปด้วย
         }
 
-    # --- ด่านที่ 2: Roboflow Model ---
+ # --- ด่านที่ 2: Roboflow Model ---
     try:
         raw_result = rf_slip_model.infer(img_cv2)
         slip_check_result = raw_result[0].dict() if isinstance(raw_result, list) else raw_result.dict()
         
         is_real_slip = False
         highest_conf = 0.0
-        detected_class = "None"
+        detected_components = [] # เปลี่ยนมาใช้ list เพื่อเก็บทุกชิ้นส่วนที่เจอ
         
         if 'predictions' in slip_check_result:
             for p in slip_check_result['predictions']:
-                # ดึงชื่อ Class ออกมาดู (ระวังเรื่องตัวพิมพ์เล็ก-ใหญ่ หรือภาษาไทย)
                 p_class = p.get('class', p.get('class_name', '')).lower()
                 p_conf = p['confidence']
                 
+                # หาค่าความมั่นใจสูงสุดจากทุกชิ้นส่วน
                 if p_conf > highest_conf:
                     highest_conf = p_conf
-                    detected_class = p_class
 
-                # ถ้าเจอคีย์เวิร์ดว่าเป็นสลิป และคะแนนผ่านเกณฑ์
-                if 'slip' in p_class or 'โอนเงิน' in p_class:
-                    if p_conf >= 0.70: # ปรับเกณฑ์ความเข้มงวดตามต้องการ
-                        is_real_slip = True
-                        break
+                # ถ้าความมั่นใจผ่านเกณฑ์ ให้เก็บชื่อชิ้นส่วนนั้นลงกระเป๋า
+                if p_conf >= 0.70: 
+                    detected_components.append(p_class)
         
+        # กรองดูว่ามีชิ้นส่วนที่เกี่ยวกับสลิปไหม (เช่น slip-send, slip-receiver)
+        valid_slip_parts = [c for c in detected_components if 'slip' in c or 'โอนเงิน' in c]
+        
+        # เงื่อนไข: ถ้าเจอองค์ประกอบที่เกี่ยวกับสลิปอย่างน้อย 1 อย่าง ถือว่าผ่าน
+        # (หรือถ้าอยากให้เข้มงวด ต้องเจอทั้งผู้โอนและผู้รับ สามารถเปลี่ยนเป็น if len(valid_slip_parts) >= 2 ได้)
+        if len(valid_slip_parts) > 0:
+            is_real_slip = True
+
         stage2_result = {
-            "model2_class": detected_class,
-            "model2_conf": round(highest_conf * 100, 2)
+            "model2_components": detected_components, # โชว์เป็นลิสต์เลยว่าเจอจุดไหนบ้าง
+            "model2_max_conf": round(highest_conf * 100, 2)
         }
         logger.info(f"Stage 2 (Roboflow): {stage2_result}")
 
         if not is_real_slip:
             return {
                 "status": "ไม่ผ่าน", 
-                "reason": f"AI ตรวจไม่พบว่าเป็นสลิป (Detected: {detected_class})", 
+                "reason": f"AI ตรวจไม่พบองค์ประกอบของสลิป (Detected: {detected_components})", 
                 "confidence": highest_conf,
                 "model1": stage1_result,
                 "model2": stage2_result
@@ -157,10 +162,18 @@ def process_slip_logic(img_cv2: np.ndarray) -> dict:
             "status": "ผ่าน", 
             "reason": "ตรวจสอบสำเร็จ", 
             "confidence": highest_conf,
-            "model1": stage1_result, # โชว์ว่า Model 1 เห็นยังไง
-            "model2": stage2_result  # โชว์ว่า Model 2 เห็นยังไง
+            "model1": stage1_result,
+            "model2": stage2_result
         }
 
+    except Exception as e:
+        logger.error(f"Error in Roboflow: {e}")
+        return {
+            "status": "ไม่มั่นใจ", 
+            "reason": f"Error: {str(e)}", 
+            "confidence": 0.0,
+            "model1": stage1_result
+        }
     except Exception as e:
         logger.error(f"Error in Roboflow: {e}")
         return {

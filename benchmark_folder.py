@@ -10,7 +10,7 @@ API_URL = "http://127.0.0.1:8000/api/scan-slip/"
 # API_URL = "http://159.65.8.69/scan-slip/"
 FOLDER_PATH = "./test-2" 
 CONCURRENT_USERS = 10  
-api_key = "sk_JTXILkSI65A0aXJB6BPARM8YugPmshzwPRjOx8w2vV8"
+api_key = "sk_HfugzWxIHhIoy-58WGCYw3ql2DVbFAYxyXbVQJ83POs"
 # กวาดหารูปภาพ
 image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG']
 image_files = []
